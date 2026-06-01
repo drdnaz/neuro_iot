@@ -1,0 +1,631 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>NEURO-SENTINEL Assistant</title>
+  <style>
+    :root {
+      --bg:        #0a0a10;
+      --surface:   #10121e;
+      --border:    #1a2040;
+      --accent:    #01aeff;
+      --accent2:   #4ade80;
+      --warning:   #f59e0b;
+      --critical:  #ef4444;
+      --text:      #e0e8f0;
+      --text-dim:  #4a5878;
+      --user-bg:   #0d1525;
+      --ai-bg:     #0a1018;
+      --recording: #ef4444;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+    }
+
+    /* ── Header ────────────────────────────────────────────────────────── */
+    header {
+      padding: 10px 16px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      flex-shrink: 0;
+    }
+
+    header .logo {
+      width: 30px; height: 30px;
+      border-radius: 6px;
+      background: linear-gradient(135deg, var(--accent), #005fa3);
+      display: flex; align-items: center; justify-content: center;
+      font-size: 15px;
+      flex-shrink: 0;
+    }
+
+    header h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 1px;
+      color: var(--accent);
+    }
+
+    header h1 span {
+      color: var(--text-dim);
+      font-weight: 400;
+      font-size: 12px;
+      letter-spacing: 0;
+      margin-left: 6px;
+    }
+
+    #conn-status {
+      margin-left: auto;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      font-size: 11px;
+      color: var(--text-dim);
+    }
+
+    #conn-dot {
+      width: 6px; height: 6px;
+      border-radius: 50%;
+      background: #333;
+      transition: background 0.3s;
+    }
+
+    #conn-dot.connected { background: var(--accent2); }
+    #conn-dot.error     { background: var(--critical); }
+
+    /* ── Sensor panel ──────────────────────────────────────────────────── */
+    #sensor-panel {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 6px;
+      padding: 8px 12px;
+      background: var(--surface);
+      border-bottom: 1px solid var(--border);
+      flex-shrink: 0;
+    }
+
+    .sc {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 6px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+      min-width: 0;
+      transition: border-color 0.4s;
+    }
+
+    .sc.safe     { border-color: #1a3a28; }
+    .sc.warning  { border-color: #3a2a08; }
+    .sc.critical { border-color: #3a1010; animation: flash 1s ease-in-out infinite; }
+
+    @keyframes flash {
+      0%, 100% { border-color: #3a1010; }
+      50%       { border-color: var(--critical); }
+    }
+
+    .sc-label {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      color: var(--text-dim);
+    }
+
+    .sc-value {
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .sc-value.safe     { color: var(--accent2); }
+    .sc-value.warning  { color: var(--warning); }
+    .sc-value.critical { color: var(--critical); }
+
+    .sc-status {
+      font-size: 9px;
+      color: var(--text-dim);
+      letter-spacing: 0.5px;
+    }
+
+    #sensor-age {
+      grid-column: 1 / -1;
+      font-size: 9px;
+      color: var(--text-dim);
+      text-align: right;
+    }
+
+    /* ── Chat area ─────────────────────────────────────────────────────── */
+    #chat {
+      flex: 1;
+      overflow-y: auto;
+      padding: 12px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    #chat::-webkit-scrollbar { width: 3px; }
+    #chat::-webkit-scrollbar-track { background: transparent; }
+    #chat::-webkit-scrollbar-thumb { background: #1a2040; border-radius: 2px; }
+
+    .msg {
+      max-width: 80%;
+      padding: 9px 13px;
+      border-radius: 12px;
+      font-size: 13px;
+      line-height: 1.55;
+      animation: fadeUp 0.18s ease;
+    }
+
+    @keyframes fadeUp {
+      from { opacity: 0; transform: translateY(5px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    .msg .role {
+      font-size: 9px;
+      font-weight: 700;
+      letter-spacing: 0.8px;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+      opacity: 0.5;
+    }
+
+    .msg.user {
+      background: var(--user-bg);
+      border: 1px solid #18204a;
+      align-self: flex-end;
+      border-bottom-right-radius: 3px;
+    }
+
+    .msg.user .role { color: var(--accent); }
+
+    .msg.ai {
+      background: var(--ai-bg);
+      border: 1px solid #101828;
+      align-self: flex-start;
+      border-bottom-left-radius: 3px;
+    }
+
+    .msg.ai .role { color: var(--accent2); }
+
+    /* ── Status bar ────────────────────────────────────────────────────── */
+    #status-bar {
+      padding: 4px 16px;
+      font-size: 11px;
+      color: var(--text-dim);
+      min-height: 22px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      flex-shrink: 0;
+    }
+
+    #status-bar.active { color: var(--accent); }
+
+    .dots { display: inline-flex; gap: 3px; align-items: center; }
+    .dots span {
+      width: 3px; height: 3px;
+      border-radius: 50%;
+      background: currentColor;
+      animation: blink 0.9s infinite;
+    }
+    .dots span:nth-child(2) { animation-delay: 0.15s; }
+    .dots span:nth-child(3) { animation-delay: 0.30s; }
+
+    @keyframes blink {
+      0%, 80%, 100% { opacity: 0.2; transform: scale(1); }
+      40%           { opacity: 1;   transform: scale(1.4); }
+    }
+
+    /* ── Controls ──────────────────────────────────────────────────────── */
+    #controls {
+      padding: 10px 16px 14px;
+      background: var(--surface);
+      border-top: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    #text-row { display: flex; gap: 7px; }
+
+    #text-input {
+      flex: 1;
+      background: #090d18;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      padding: 8px 12px;
+      outline: none;
+      transition: border-color 0.2s;
+      font-family: inherit;
+    }
+
+    #text-input:focus { border-color: var(--accent); }
+    #text-input::placeholder { color: var(--text-dim); }
+
+    #send-btn {
+      background: var(--accent);
+      color: #000;
+      border: none;
+      border-radius: 8px;
+      padding: 8px 14px;
+      font-size: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+      font-family: inherit;
+      white-space: nowrap;
+    }
+
+    #send-btn:hover:not(:disabled) { opacity: 0.82; }
+    #send-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    #ptt-btn {
+      width: 100%;
+      padding: 13px;
+      border-radius: 10px;
+      border: 1.5px solid var(--accent);
+      background: transparent;
+      color: var(--accent);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.12s;
+      user-select: none;
+      -webkit-user-select: none;
+      touch-action: none;
+      font-family: inherit;
+      letter-spacing: 0.3px;
+    }
+
+    #ptt-btn:hover:not(:disabled) { background: rgba(1,174,255,0.06); }
+
+    #ptt-btn.recording {
+      background: var(--recording);
+      border-color: var(--recording);
+      color: white;
+      animation: pulse 1.2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% { box-shadow: 0 0 0 0 rgba(239,68,68,0.4); }
+      50%       { box-shadow: 0 0 0 10px rgba(239,68,68,0); }
+    }
+
+    #ptt-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+
+    #hint {
+      text-align: center;
+      font-size: 10px;
+      color: var(--text-dim);
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <div class="logo">🛡️</div>
+  <h1>NEURO-SENTINEL <span>AI Assistant</span></h1>
+  <div id="conn-status">
+    <div id="conn-dot"></div>
+    <span id="conn-text">Connecting...</span>
+  </div>
+</header>
+
+<!-- Sensor Status Panel -->
+<div id="sensor-panel">
+  <div class="sc" id="sc-temp">
+    <div class="sc-label">TEMPERATURE</div>
+    <div class="sc-value" id="sv-temp">--</div>
+    <div class="sc-status" id="ss-temp">no data</div>
+  </div>
+  <div class="sc" id="sc-gas">
+    <div class="sc-label">GAS / AIR</div>
+    <div class="sc-value" id="sv-gas">--</div>
+    <div class="sc-status" id="ss-gas">no data</div>
+  </div>
+  <div class="sc" id="sc-sound">
+    <div class="sc-label">ACOUSTIC</div>
+    <div class="sc-value" id="sv-sound">--</div>
+    <div class="sc-status" id="ss-sound">no data</div>
+  </div>
+  <div class="sc" id="sc-motion">
+    <div class="sc-label">MOTION</div>
+    <div class="sc-value" id="sv-motion">--</div>
+    <div class="sc-status" id="ss-motion">no data</div>
+  </div>
+  <div id="sensor-age">sensor feed: waiting for ESP32...</div>
+</div>
+
+<div id="chat">
+  <div class="msg ai">
+    <div class="role">SENTINEL</div>
+    NEURO-SENTINEL online. Ask me about sensor readings, system status, or anything else.
+  </div>
+</div>
+
+<div id="status-bar">Ready</div>
+
+<div id="controls">
+  <div id="text-row">
+    <input id="text-input" type="text" placeholder="Ask about sensors, status, or type anything..." autocomplete="off" />
+    <button id="send-btn" disabled>Send</button>
+  </div>
+  <button id="ptt-btn" disabled>🎤&nbsp;&nbsp;Hold to Talk</button>
+  <div id="hint">Hold <kbd style="background:#111;border:1px solid #333;border-radius:3px;padding:1px 5px;font-size:9px">Space</kbd> to record</div>
+</div>
+
+<script>
+  const chat      = document.getElementById('chat');
+  const statusBar = document.getElementById('status-bar');
+  const pttBtn    = document.getElementById('ptt-btn');
+  const textInput = document.getElementById('text-input');
+  const sendBtn   = document.getElementById('send-btn');
+  const connDot   = document.getElementById('conn-dot');
+  const connText  = document.getElementById('conn-text');
+
+  let ws            = null;
+  let mediaRecorder = null;
+  let audioChunks   = [];
+  let isRecording   = false;
+  let busy          = false;
+
+  // ── WebSocket ──────────────────────────────────────────────────────────────
+  function connect() {
+    const url = `ws://${location.host}/ws/chat`;
+    ws = new WebSocket(url);
+    ws.binaryType = 'arraybuffer';
+
+    ws.onopen = () => {
+      connDot.className = 'connected';
+      connText.textContent = 'Connected';
+      pttBtn.disabled = false;
+      sendBtn.disabled = false;
+      setStatus('Ready');
+    };
+
+    ws.onclose = () => {
+      connDot.className = 'error';
+      connText.textContent = 'Disconnected';
+      pttBtn.disabled = true;
+      sendBtn.disabled = true;
+      setStatus('Disconnected — reconnecting...');
+      setTimeout(connect, 3000);
+    };
+
+    ws.onerror = () => {
+      connDot.className = 'error';
+      connText.textContent = 'Error';
+    };
+
+    ws.onmessage = (e) => {
+      if (e.data instanceof ArrayBuffer) {
+        playAudio(e.data);
+      } else {
+        try { handleMsg(JSON.parse(e.data)); } catch(_) {}
+      }
+    };
+  }
+
+  function handleMsg(msg) {
+    const states = {
+      transcribing: ['🎙️ Transcribing...', true],
+      thinking:     ['🤔 Thinking...',      true],
+      speaking:     ['🔊 Speaking...',      true],
+      ready:        ['Ready',               false],
+      error:        ['Error',               false],
+    };
+    switch (msg.type) {
+      case 'status':
+        const [label, active] = states[msg.state] || [msg.state, false];
+        setStatus(label, active);
+        if (msg.state === 'ready') busy = false;
+        break;
+      case 'transcript':
+        if (msg.text) addMsg('user', msg.text);
+        break;
+      case 'answer':
+        if (msg.text) addMsg('ai', msg.text);
+        busy = true;
+        break;
+      case 'error':
+        addMsg('ai', '⚠️ ' + msg.message);
+        setStatus('Error');
+        busy = false;
+        break;
+    }
+  }
+
+  // ── Audio playback ─────────────────────────────────────────────────────────
+  function playAudio(buffer) {
+    const blob  = new Blob([buffer], { type: 'audio/wav' });
+    const url   = URL.createObjectURL(blob);
+    const audio = new Audio(url);
+    audio.onended = () => URL.revokeObjectURL(url);
+    audio.onerror = () => { URL.revokeObjectURL(url); setStatus('Ready'); busy = false; };
+    audio.play().catch(() => { setStatus('Ready'); busy = false; });
+  }
+
+  // ── UI helpers ─────────────────────────────────────────────────────────────
+  function addMsg(role, text) {
+    const div    = document.createElement('div');
+    div.className = `msg ${role}`;
+    const roleEl  = document.createElement('div');
+    roleEl.className = 'role';
+    roleEl.textContent = role === 'user' ? 'YOU' : 'SENTINEL';
+    div.appendChild(roleEl);
+    div.appendChild(document.createTextNode(text));
+    chat.appendChild(div);
+    chat.scrollTop = chat.scrollHeight;
+  }
+
+  function setStatus(text, active = false) {
+    statusBar.textContent = '';
+    statusBar.className = active ? 'active' : '';
+    if (active) {
+      const dots = document.createElement('span');
+      dots.className = 'dots';
+      dots.innerHTML = '<span></span><span></span><span></span>';
+      statusBar.appendChild(dots);
+      statusBar.appendChild(document.createTextNode(' ' + text));
+    } else {
+      statusBar.textContent = text;
+    }
+  }
+
+  // ── Sensor panel ───────────────────────────────────────────────────────────
+  function levelClass(val, warn, crit) {
+    if (val >= crit)  return 'critical';
+    if (val >= warn)  return 'warning';
+    return 'safe';
+  }
+
+  function updateSensorPanel(d) {
+    if (!d || Object.keys(d).length === 0) return;
+
+    if ('temperature' in d) {
+      const t  = d.temperature;
+      const cl = t > 31.5 ? 'critical' : t >= 29 ? 'warning' : 'safe';
+      const st = t > 31.5 ? 'CRITICAL' : t >= 29 ? 'WARM' : 'NORMAL';
+      setCard('temp', `${t.toFixed(1)}°C`, st, cl);
+    }
+    if ('gas_raw' in d) {
+      const g  = d.gas_raw;
+      const cl = g > 1200 ? 'critical' : g >= 800 ? 'warning' : 'safe';
+      const st = g > 1200 ? 'CRITICAL' : g >= 800 ? 'HIGH' : 'CLEAN';
+      setCard('gas', `${g}`, st, cl);
+    }
+    if ('audio_level' in d) {
+      const a  = d.audio_level;
+      const cl = a > 2500 ? 'critical' : a >= 1000 ? 'warning' : 'safe';
+      const st = a > 2500 ? 'ALARM' : a >= 1000 ? 'WARNING' : 'QUIET';
+      setCard('sound', `${a}`, st, cl);
+    }
+    if ('motion_detected' in d) {
+      const m  = d.motion_detected;
+      const cl = m ? 'warning' : 'safe';
+      setCard('motion', m ? 'DETECTED' : 'NONE', m ? 'PIR ACTIVE' : 'PIR IDLE', cl);
+    }
+  }
+
+  function setCard(id, value, status, cls) {
+    const card = document.getElementById(`sc-${id}`);
+    const val  = document.getElementById(`sv-${id}`);
+    const sta  = document.getElementById(`ss-${id}`);
+    card.className = `sc ${cls}`;
+    val.className  = `sc-value ${cls}`;
+    val.textContent  = value;
+    sta.textContent  = status;
+  }
+
+  async function fetchSensors() {
+    try {
+      const resp = await fetch('/api/sensor-data');
+      const body = await resp.json();
+      const ageEl = document.getElementById('sensor-age');
+      if (body.stale) {
+        ageEl.textContent = 'sensor feed: waiting for ESP32...';
+      } else {
+        ageEl.textContent = `sensor feed: ${body.age_seconds}s ago`;
+        updateSensorPanel(body.data);
+      }
+    } catch (_) {}
+  }
+
+  fetchSensors();
+  setInterval(fetchSensors, 5000);
+
+  // ── Recording ──────────────────────────────────────────────────────────────
+  async function startRecording() {
+    if (isRecording || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, sampleRate: 16000 }
+      });
+      const mimeType = ['audio/webm;codecs=opus', 'audio/webm', 'audio/ogg;codecs=opus', '']
+        .find(t => t === '' || MediaRecorder.isTypeSupported(t));
+      const options = mimeType ? { mimeType } : {};
+      mediaRecorder = new MediaRecorder(stream, options);
+      audioChunks = [];
+      mediaRecorder.ondataavailable = e => { if (e.data.size > 0) audioChunks.push(e.data); };
+      mediaRecorder.onstop = async () => {
+        stream.getTracks().forEach(t => t.stop());
+        if (audioChunks.length === 0) return;
+        const blob = new Blob(audioChunks);
+        const buf  = await blob.arrayBuffer();
+        if (ws && ws.readyState === WebSocket.OPEN) { ws.send(buf); busy = true; }
+      };
+      mediaRecorder.start(100);
+      isRecording = true;
+      pttBtn.classList.add('recording');
+      pttBtn.textContent = '🔴  Recording...';
+      setStatus('Recording...', false);
+    } catch (err) {
+      setStatus('Microphone access denied');
+    }
+  }
+
+  function stopRecording() {
+    if (!isRecording || !mediaRecorder) return;
+    mediaRecorder.stop();
+    isRecording = false;
+    pttBtn.classList.remove('recording');
+    pttBtn.textContent = '🎤  Hold to Talk';
+  }
+
+  pttBtn.addEventListener('mousedown',  () => startRecording());
+  pttBtn.addEventListener('mouseup',    () => stopRecording());
+  pttBtn.addEventListener('mouseleave', () => stopRecording());
+  pttBtn.addEventListener('touchstart', e => { e.preventDefault(); startRecording(); }, { passive: false });
+  pttBtn.addEventListener('touchend',   e => { e.preventDefault(); stopRecording(); },  { passive: false });
+
+  document.addEventListener('keydown', e => {
+    if (e.code === 'Space' && !e.repeat && document.activeElement === document.body) {
+      e.preventDefault(); startRecording();
+    }
+  });
+  document.addEventListener('keyup', e => {
+    if (e.code === 'Space' && document.activeElement === document.body) {
+      e.preventDefault(); stopRecording();
+    }
+  });
+
+  // ── Text input ─────────────────────────────────────────────────────────────
+  function sendText() {
+    const text = textInput.value.trim();
+    if (!text || busy || !ws || ws.readyState !== WebSocket.OPEN) return;
+    ws.send(JSON.stringify({ type: 'text', content: text }));
+    textInput.value = '';
+    busy = true;
+  }
+
+  sendBtn.addEventListener('click', sendText);
+  textInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); sendText(); }
+  });
+
+  connect();
+</script>
+</body>
+</html>
