@@ -92,17 +92,34 @@ SemaphoreHandle_t mic_sem = NULL; // Mikrofon erişim kilidi
 volatile bool alarm_active = false;           // Sensör koşulları alarm gerektiriyor
 volatile TickType_t last_llm_audio_tick = 0;  // Son LLM ses parçasının zamanı
 
+#define LLM_VOLUME 40  // LLM ses seviyesi % (0-100); düşürmek için azaltın
+
 // ─── WebSocket Callbacks ──────────────────────────────────────────────────────
 void on_audio_received(const uint8_t *pcm, size_t len) {
-  printf("[WS_AUDIO] Sunucudan %zu byte sifresiz PCM alindi, caliniyor...\n", len);
-  last_llm_audio_tick = xTaskGetTickCount(); // alarm_sound_task bu sürede susar
+  last_llm_audio_tick = xTaskGetTickCount();
+
+  int n_samples = len / 2;
+  int16_t *buf = malloc(len);
+  if (!buf) {
+    // Bellek yetersizse tam ses seviyesiyle yaz
+    size_t written = 0;
+    i2s_channel_write(tx_chan, pcm, len, &written, portMAX_DELAY);
+    return;
+  }
+
+  const int16_t *src = (const int16_t *)pcm;
+  for (int i = 0; i < n_samples; i++) {
+    buf[i] = (int16_t)((int32_t)src[i] * LLM_VOLUME / 100);
+  }
+
   size_t written = 0;
-  esp_err_t err = i2s_channel_write(tx_chan, pcm, len, &written, portMAX_DELAY);
+  esp_err_t err = i2s_channel_write(tx_chan, buf, len, &written, portMAX_DELAY);
   if (err != ESP_OK) {
     printf("[WS_AUDIO] I2S yazma hatasi: %s\n", esp_err_to_name(err));
   } else if (written != len) {
     printf("[WS_AUDIO] Eksik yazma: %zu/%zu byte\n", written, len);
   }
+  free(buf);
 }
 
 void on_text_received(const char *json, size_t len) {
@@ -527,11 +544,6 @@ void alarm_sound_task(void *pvParameters) {
 static int level_temp(float t) {
   if (t > 31.5f) return 2;
   if (t >= 29.0f) return 1;
-  return 0;
-}
-static int level_gas(int g) {
-  if (g > 1200) return 2;
-  if (g >= 800) return 1;
   return 0;
 }
 static int level_audio(int a) {
