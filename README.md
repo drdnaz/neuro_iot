@@ -1,7 +1,6 @@
 # NEURO-SENTINEL
 ### AI-Powered Local Forensic Node for Critical Environment Analysis
-**CEN322 – Internet of Things | Recep Tayyip Erdogan University**
-**Owners: Durdane Naz BABAOĞLU, Şevval ASİ** 
+**CEN322 – Internet of Things | Recep Tayyip Erdogan University | Owners: Durdane Naz BABAOĞLU, Şevval ASİ**
 
 ---
 
