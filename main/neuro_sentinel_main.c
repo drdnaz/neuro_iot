@@ -89,9 +89,13 @@ i2s_chan_handle_t tx_chan;   // Siren/Amfi Kanalı
 spi_device_handle_t spi_lcd; // LCD SPI Cihazı
 SemaphoreHandle_t mic_sem = NULL; // Mikrofon erişim kilidi
 
+volatile bool alarm_active = false;           // Sensör koşulları alarm gerektiriyor
+volatile TickType_t last_llm_audio_tick = 0;  // Son LLM ses parçasının zamanı
+
 // ─── WebSocket Callbacks ──────────────────────────────────────────────────────
 void on_audio_received(const uint8_t *pcm, size_t len) {
   printf("[WS_AUDIO] Sunucudan %zu byte sifresiz PCM alindi, caliniyor...\n", len);
+  last_llm_audio_tick = xTaskGetTickCount(); // alarm_sound_task bu sürede susar
   size_t written = 0;
   esp_err_t err = i2s_channel_write(tx_chan, pcm, len, &written, portMAX_DELAY);
   if (err != ESP_OK) {
@@ -205,41 +209,6 @@ void play_alarm_tone() {
   }
 }
 
-// Hoparlör donanım testi: 1kHz ton, 2 saniye, tam ses seviyesi
-// I2S yazma sonucunu seri porta yazdırır — ses çıkmıyorsa hata teşhisine yarar
-void test_speaker_output() {
-  printf("[TEST] Hoparlor testi basliyor (1kHz, 2 saniye)...\n");
-
-  const int SAMPLE_RATE = 22050;
-  const int FREQ = 1000;
-  const int BUF_SAMPLES = 1024;
-  int16_t buf[BUF_SAMPLES];
-
-  for (int i = 0; i < BUF_SAMPLES; i++) {
-    buf[i] = (int16_t)(28000 * sin(2.0 * M_PI * FREQ * i / SAMPLE_RATE));
-  }
-
-  // 2 saniye = 22050 * 2 / BUF_SAMPLES = ~43 döngü
-  int total_written = 0;
-  int loops = (SAMPLE_RATE * 2) / BUF_SAMPLES;
-  for (int k = 0; k < loops; k++) {
-    size_t written = 0;
-    esp_err_t err = i2s_channel_write(tx_chan, buf, sizeof(buf), &written, pdMS_TO_TICKS(500));
-    if (err != ESP_OK) {
-      printf("[TEST][HATA] I2S yazma hatasi: %s (dongu %d)\n", esp_err_to_name(err), k);
-      break;
-    }
-    total_written += written;
-  }
-
-  printf("[TEST] Tamamlandi. Toplam yazilan: %d byte  Beklenen: %d byte\n",
-         total_written, BUF_SAMPLES * 2 * loops);
-  if (total_written == BUF_SAMPLES * 2 * loops) {
-    printf("[TEST] I2S tampon yazimi BASARILI — ses cikmiyor ise kablolama kontrol edin.\n");
-  } else {
-    printf("[TEST] UYARI: Eksik yazim! I2S kanali veya amfi sorunu olabilir.\n");
-  }
-}
 
 void init_microphone() {
   if (!mic_sem) {
@@ -526,6 +495,24 @@ void draw_sensor_box(spi_device_handle_t spi, uint16_t x, uint16_t y,
 // 6. FREERTOS PARALEL GÖREVLERİ (TASKS)
 // ==========================================
 
+// Alarm ses görevi: alarm_active olduğu sürece ton çalar.
+// LLM son ses parçasından 800ms geçmeden susar (LLM'e öncelik tanır).
+void alarm_sound_task(void *pvParameters) {
+  printf("[TASK] Alarm ses gorevi baslatildi.\n");
+  while (1) {
+    if (alarm_active) {
+      bool llm_speaking = (xTaskGetTickCount() - last_llm_audio_tick) < pdMS_TO_TICKS(800);
+      if (!llm_speaking) {
+        play_alarm_tone();
+      } else {
+        vTaskDelay(pdMS_TO_TICKS(100));
+      }
+    } else {
+      vTaskDelay(pdMS_TO_TICKS(200));
+    }
+  }
+}
+
 // Sensör seviye sınıflandırması: 0=güvenli, 1=sarı(uyarı), 2=kırmızı(kritik)
 static int level_temp(float t) {
   if (t > 31.5f) return 2;
@@ -575,7 +562,6 @@ void sensor_reading_task(void *pvParameters) {
   init_microphone();
 
   int ses_hafizasi = 0;
-  TickType_t alarm_cooldown = 0; // Son alarm zamanı (5 sn bekleme)
 
   while (1) {
     // Sensörleri Oku (Hızlı okuma, delay yok!)
@@ -613,13 +599,14 @@ void sensor_reading_task(void *pvParameters) {
       int yellow = (lv_temp == 1) + (lv_gas == 1) + (lv_audio == 1) + (lv_motion == 1);
       int red    = (lv_temp == 2) + (lv_gas == 2) + (lv_audio == 2) + (lv_motion == 2);
 
-      TickType_t now = xTaskGetTickCount();
-      if (check_alarm(yellow, red) && (now - alarm_cooldown) > pdMS_TO_TICKS(5000)) {
-        printf("[ALARM] SIREN! Sari=%d Kirmizi=%d  (ISI:%.1fC GAZ:%d SES:%d PIR:%d)\n",
+      bool triggered = check_alarm(yellow, red);
+      if (triggered && !alarm_active) {
+        printf("[ALARM] BASLADI! Sari=%d Kirmizi=%d  (ISI:%.1fC GAZ:%d SES:%d PIR:%d)\n",
                yellow, red, temp, gas_raw, audio_lvl, pir_val);
-        play_alarm_tone();
-        alarm_cooldown = now;
+      } else if (!triggered && alarm_active) {
+        printf("[ALARM] SONA ERDI. Sari=%d Kirmizi=%d\n", yellow, red);
       }
+      alarm_active = triggered;
     }
 
     // Diğer görevlere süre vermek için bekleme
@@ -1004,11 +991,9 @@ void app_main(void) {
   lcd_init(spi_lcd);
   printf("[OK] Ekran başarıyla kuruldu.\n");
 
-  // --- HOPARLÖR DONANIM SİSTEM TESTİ ---
-  printf("[TEST] I2S Amfi baslatiliyor ve hoparlor testi yapiliyor...\n");
+  // Amplifikatörü başlat ve açılış bip sesi çal
   init_amplifier();
-  test_speaker_output();
-  printf("[TEST] Hoparlor acilis testi tamamlandi.\n");
+  play_alarm_tone();
 
   // --- FREERTOS PARALEL GÖREVLERİN OLUŞTURULMASI ---
 
@@ -1036,6 +1021,10 @@ void app_main(void) {
   // 5. WiFi Sensör Veri Gönderim Görevi (Öncelik: 3, Core 0)
   xTaskCreatePinnedToCore(wifi_data_task, "wifi_data_task", 4096, NULL, 3, NULL,
                           0);
+
+  // 6. Alarm Ses Görevi (Öncelik: 3, Core 0) — alarm_active flag'ini izler
+  xTaskCreatePinnedToCore(alarm_sound_task, "alarm_sound_task", 2048, NULL, 3,
+                          NULL, 0);
 
   printf("[SİSTEM] Tüm paralel alt görevler kararlı şekilde başlatıldı.\n");
   printf("[SİSTEM] BOOT butonuna (GPIO0) basılı tutarak ESP32 mikrofonuyla "
