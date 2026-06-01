@@ -509,14 +509,16 @@ void alarm_sound_task(void *pvParameters) {
     if (alarm_active) {
       bool llm_speaking = (xTaskGetTickCount() - last_llm_audio_tick) < pdMS_TO_TICKS(800);
       if (!llm_speaking) {
+        printf("[ALARM_SOUND] Siren caliyor\n");
         play_alarm_tone();
       } else {
-        vTaskDelay(pdMS_TO_TICKS(100));
+        // LLM konuşurken DMA'yı sessizlikle doldur
+        i2s_channel_write(tx_chan, s_silence, sizeof(s_silence), &written, pdMS_TO_TICKS(100));
       }
     } else {
-      // DMA tamponunu sessizlikle doldur (tekrar çalmayı engelle)
-      i2s_channel_write(tx_chan, s_silence, sizeof(s_silence), &written, pdMS_TO_TICKS(50));
-      vTaskDelay(pdMS_TO_TICKS(180));
+      // Alarm yok: vTaskDelay yok — i2s_channel_write DMA dolunca kendiliğinden
+      // bekler (~11.6ms/yazma), böylece tampon hiç boşalmaz ve eski ton tekrar çalmaz
+      i2s_channel_write(tx_chan, s_silence, sizeof(s_silence), &written, pdMS_TO_TICKS(100));
     }
   }
 }
@@ -1029,7 +1031,7 @@ void app_main(void) {
                           0);
 
   // 6. Alarm Ses Görevi (Öncelik: 3, Core 0) — alarm_active flag'ini izler
-  xTaskCreatePinnedToCore(alarm_sound_task, "alarm_sound_task", 2048, NULL, 3,
+  xTaskCreatePinnedToCore(alarm_sound_task, "alarm_sound_task", 4096, NULL, 3,
                           NULL, 0);
 
   printf("[SİSTEM] Tüm paralel alt görevler kararlı şekilde başlatıldı.\n");
