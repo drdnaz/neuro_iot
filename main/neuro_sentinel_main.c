@@ -541,13 +541,9 @@ static int level_audio(int a) {
 }
 static int level_motion(int m) { return m == 1 ? 1 : 0; }
 
-// Alarm koşulları:
-//   3+ sarı  |  2 kırmızı+1 sarı  |  1 kırmızı+3 sarı  |  3+ kırmızı
-static bool check_alarm(int yellow, int red) {
-  return (yellow >= 3) ||
-         (red >= 2 && yellow >= 1) ||
-         (red >= 1 && yellow >= 3) ||
-         (red >= 3);
+// Alarm koşulu: akustik KIRMIZI + sıcaklık KIRMIZI + hareket SARI — üçü aynı anda
+static bool check_alarm(int lv_audio, int lv_temp, int lv_motion) {
+  return (lv_audio == 2) && (lv_temp == 2) && (lv_motion >= 1);
 }
 
 // GÖREV A: HIZLI SENSÖR OKUMA VE ALARM TETİKLEYİCİ GÖREVİ (Mikrofon + Gaz +
@@ -602,19 +598,16 @@ void sensor_reading_task(void *pvParameters) {
     if (temp != -99.0) {
       // Her sensör seviyesini hesapla
       int lv_temp   = level_temp(temp);
-      int lv_gas    = level_gas(gas_raw);
       int lv_audio  = level_audio(audio_lvl);
       int lv_motion = level_motion(pir_val);
 
-      int yellow = (lv_temp == 1) + (lv_gas == 1) + (lv_audio == 1) + (lv_motion == 1);
-      int red    = (lv_temp == 2) + (lv_gas == 2) + (lv_audio == 2) + (lv_motion == 2);
-
-      bool triggered = check_alarm(yellow, red);
+      bool triggered = check_alarm(lv_audio, lv_temp, lv_motion);
       if (triggered && !alarm_active) {
-        printf("[ALARM] BASLADI! Sari=%d Kirmizi=%d  (ISI:%.1fC GAZ:%d SES:%d PIR:%d)\n",
-               yellow, red, temp, gas_raw, audio_lvl, pir_val);
+        printf("[ALARM] BASLADI! ISI:%.1fC(K) SES:%d(K) PIR:%d(S)\n",
+               temp, audio_lvl, pir_val);
       } else if (!triggered && alarm_active) {
-        printf("[ALARM] SONA ERDI. Sari=%d Kirmizi=%d\n", yellow, red);
+        printf("[ALARM] SONA ERDI. ISI:%.1fC SES:%d PIR:%d\n",
+               temp, audio_lvl, pir_val);
       }
       alarm_active = triggered;
     }
