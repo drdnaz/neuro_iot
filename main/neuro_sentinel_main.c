@@ -495,10 +495,16 @@ void draw_sensor_box(spi_device_handle_t spi, uint16_t x, uint16_t y,
 // 6. FREERTOS PARALEL GÖREVLERİ (TASKS)
 // ==========================================
 
+// Sessizlik tamponu: DMA'nın eski ses verisini tekrar çalmasını önler
+static int16_t s_silence[256];  // sıfır dolu, global scope'ta sıfırlanmış
+
 // Alarm ses görevi: alarm_active olduğu sürece ton çalar.
 // LLM son ses parçasından 800ms geçmeden susar (LLM'e öncelik tanır).
+// Alarm yokken DMA tamponu sessizlikle doldurulur — aksi hâlde DMA son
+// çalınan bloğu tekrar oynatır ve sürekli ses çıkar.
 void alarm_sound_task(void *pvParameters) {
   printf("[TASK] Alarm ses gorevi baslatildi.\n");
+  size_t written;
   while (1) {
     if (alarm_active) {
       bool llm_speaking = (xTaskGetTickCount() - last_llm_audio_tick) < pdMS_TO_TICKS(800);
@@ -508,7 +514,9 @@ void alarm_sound_task(void *pvParameters) {
         vTaskDelay(pdMS_TO_TICKS(100));
       }
     } else {
-      vTaskDelay(pdMS_TO_TICKS(200));
+      // DMA tamponunu sessizlikle doldur (tekrar çalmayı engelle)
+      i2s_channel_write(tx_chan, s_silence, sizeof(s_silence), &written, pdMS_TO_TICKS(50));
+      vTaskDelay(pdMS_TO_TICKS(180));
     }
   }
 }
@@ -991,9 +999,7 @@ void app_main(void) {
   lcd_init(spi_lcd);
   printf("[OK] Ekran başarıyla kuruldu.\n");
 
-  // Amplifikatörü başlat ve açılış bip sesi çal
   init_amplifier();
-  play_alarm_tone();
 
   // --- FREERTOS PARALEL GÖREVLERİN OLUŞTURULMASI ---
 
